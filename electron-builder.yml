@@ -1,0 +1,29 @@
+# electron-builder 配置 —— 三形态出包
+appId: com.evoucherx.app
+productName: EVoucherX
+directories:
+  output: release
+files:
+  - app/**/*
+  - server/**/*
+  - electron/**/*
+  - node_modules/**/*
+  - package.json
+extraMetadata:
+  main: electron/main.js
+win:
+  target:
+    - nsis
+    - portable
+  artifactName: EVoucherX-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  shortcutName: 电子凭证库 EVoucher X
+mac:
+  target: dmg
+  category: public.app-category.business
+  artifactName: EVoucherX-${version}-${arch}.${ext}
+linux:
+  target: AppImage

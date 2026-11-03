@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>电子凭证库服务端外部接口测试工具</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <!-- 标题栏 -->
+  <div class="titlebar">
+    <span class="title-icon">📮</span>
+    <span class="title-text">电子凭证库服务端外部接口测试工具</span>
+    <span class="title-sub">- Admin</span>
+    <span class="win-btns">
+      <span class="win-btn">—</span>
+      <span class="win-btn">□</span>
+      <span class="win-btn win-close">✕</span>
+    </span>
+  </div>
+
+  <!-- 代理服务地址设置 -->
+  <fieldset class="addr-group">
+    <legend>代理服务地址设置</legend>
+    <div class="addr-row">
+      <span class="addr-label">地址栏：</span>
+      <div class="addr-combo">
+        <input id="wsdl-url" list="wsdl-history"
+               value="http://10.16.28.110:7775/realware/services/AsspFinanceService?wsdl" />
+        <datalist id="wsdl-history">
+          <option value="http://10.16.28.110:7775/realware/services/AsspFinanceService?wsdl"></option>
+          <option value="http://127.0.0.1:8721/mock/realware/services/AsspFinanceService?wsdl"></option>
+        </datalist>
+        <span class="combo-arrow">▾</span>
+      </div>
+      <button id="btn-connect" class="primary">连接</button>
+      <button id="btn-disconnect">断开</button>
+      <input type="checkbox" id="chk-auto" checked />
+    </div>
+    <div id="conn-status" class="conn-status">未连接</div>
+  </fieldset>
+
+  <!-- 页签 -->
+  <div class="tabs">
+    <div class="tab active" data-tab="interface">服务接口测试</div>
+    <div class="tab" data-tab="clientsign">客户端签章、签名</div>
+    <div class="tab" data-tab="voucherquery">凭证查询</div>
+  </div>
+
+  <!-- ═══ 页签1：服务接口测试（与原版一致的三栏） ═══ -->
+  <div id="tab-interface" class="tab-body active">
+    <div class="iface-grid">
+      <!-- 左：凭证库接口列表 -->
+      <section class="pane pane-list">
+        <div class="pane-head">凭证库接口列表</div>
+        <ul id="method-list" class="method-list"></ul>
+      </section>
+
+      <!-- 中：函数信息 -->
+      <section class="pane pane-func">
+        <div class="pane-head">函数信息</div>
+        <div class="func-body">
+          <div class="func-name-row">
+            <span class="fn-label">函数名:</span>
+            <span id="fn-name" class="fn-name">-</span>
+            <span id="fn-desc" class="fn-desc"></span>
+          </div>
+          <div id="param-grid" class="param-grid"></div>
+          <div class="func-actions">
+            <button id="btn-invoke" class="primary">调用函数</button>
+            <button id="btn-clear-params">清空输入参数</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- 右：调用结果 -->
+      <section class="pane pane-result">
+        <div class="pane-head">调用结果</div>
+        <pre id="result-view" class="result-view" title="点击清空">调用结果: 点击清空</pre>
+        <div class="result-tip">参数可从下拉菜单中选择或手写；参数框右侧按钮可查看参数值或生成复杂报文</div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ═══ 页签2：客户端签章、签名 ═══ -->
+  <div id="tab-clientsign" class="tab-body">
+    <div class="cs-grid">
+      <section class="pane">
+        <div class="pane-head">证书信息</div>
+        <div class="cs-body">
+          <div class="cs-row"><span>证书主题：</span><input id="cert-subject" readonly value="CN=Mock测试证书, OU=Finance, C=CN" /></div>
+          <div class="cs-row"><span>证书序列号：</span><input id="cert-sn" readonly value="00 TC10163135" /></div>
+          <div class="cs-row"><span>有效期至：</span><input id="cert-valid" readonly value="2027-12-31" /></div>
+        </div>
+      </section>
+      <section class="pane">
+        <div class="pane-head">客户端签名 / 签章操作</div>
+        <div class="cs-body">
+          <div class="cs-actions">
+            <button id="cs-sign">客户端签名</button>
+            <button id="cs-verify">验证签名</button>
+            <button id="cs-stamp">客户端签章</button>
+          </div>
+          <pre id="cs-result" class="result-view">操作结果: 点击清空</pre>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- ═══ 页签3：凭证查询 ═══ -->
+  <div id="tab-voucherquery" class="tab-body">
+    <div class="vq-grid">
+      <section class="pane pane-list">
+        <div class="pane-head">
+          凭证列表
+          <button id="vq-refresh" class="mini">刷新</button>
+        </div>
+        <ul id="vq-list" class="method-list"></ul>
+      </section>
+      <section class="pane">
+        <div class="pane-head">凭证原文预览 (pdf.js)</div>
+        <div class="vq-viewer">
+          <canvas id="pdf-canvas"></canvas>
+          <div id="vq-empty" class="viewer-empty">从左侧选择一张凭证查看原文</div>
+        </div>
+      </section>
+    </div>
+  </div>
+
+  <!-- 状态栏 -->
+  <div class="statusbar">
+    <span id="st-conn">连接：未连接</span>
+    <span id="st-mode">模式：Mock 凭证库</span>
+    <span id="st-msg">就绪</span>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

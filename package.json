@@ -1,0 +1,22 @@
+{
+  "name": "evoucher-x",
+  "version": "1.0.0",
+  "description": "EVoucher X - cross-platform rebuild of the EVoucher library client (web / windows exe / mac dmg)",
+  "main": "electron/main.js",
+  "scripts": {
+    "web": "node server/main.js --open",
+    "start": "electron .",
+    "dist:mac": "electron-builder --mac dmg",
+    "dist:win": "electron-builder --win nsis portable"
+  },
+  "author": "EVoucher Rebuild Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8",
+    "pdfjs-dist": "^4.10.38"
+  }
+}

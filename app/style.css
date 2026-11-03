@@ -1,0 +1,351 @@
+/* ============ 电子凭证库服务端外部接口测试工具 —— 复刻原版经典 Windows 风格 ============ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --title-grad: linear-gradient(180deg, #9a9aff 0%, #7b7bef 8%, #6464d2 92%, #5555b8 100%);
+  --chrome: #f0f0f0;
+  --chrome-dark: #e3e3e3;
+  --border: #9a9a9a;
+  --border-light: #ffffff;
+  --pane-head-grad: linear-gradient(180deg, #fdfdfd 0%, #ececec 100%);
+  --text: #1a1a1a;
+  --sel: #316ac5;
+}
+
+html, body {
+  height: 100%;
+  font-family: "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+  font-size: 12px;
+  color: var(--text);
+  background: var(--chrome);
+  overflow: hidden;
+}
+
+body { display: flex; flex-direction: column; }
+
+/* ---------- 标题栏 ---------- */
+.titlebar {
+  height: 30px;
+  background: var(--title-grad);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 8px;
+  user-select: none;
+  flex: none;
+}
+.title-icon { font-size: 14px; }
+.title-text { font-weight: 600; font-size: 13px; letter-spacing: 1px; }
+.title-sub { opacity: .9; }
+.win-btns { margin-left: auto; display: flex; gap: 2px; }
+.win-btn {
+  width: 30px; height: 22px;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(255,255,255,.18);
+  border: 1px solid rgba(255,255,255,.35);
+  border-radius: 2px; cursor: default;
+}
+.win-close:hover { background: #d9534f; }
+
+/* ---------- 代理服务地址设置 ---------- */
+.addr-group {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  margin: 6px 8px 2px;
+  padding: 6px 10px 8px;
+  background: var(--chrome);
+  flex: none;
+}
+.addr-group legend { padding: 0 6px; font-weight: 600; }
+.addr-row { display: flex; align-items: center; gap: 6px; }
+.addr-label { flex: none; }
+.addr-combo { position: relative; flex: 1 1 auto; min-width: 280px; }
+.addr-combo input {
+  width: 100%; height: 24px;
+  border: 1px solid var(--border);
+  padding: 0 22px 0 6px;
+  font-size: 12px;
+  background: #fff;
+}
+.combo-arrow {
+  position: absolute; right: 1px; top: 1px; bottom: 1px;
+  width: 20px; display: flex; align-items: center; justify-content: center;
+  background: var(--pane-head-grad);
+  border-left: 1px solid var(--border);
+  pointer-events: none;
+}
+.conn-status {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #888;
+}
+.conn-status.ok { color: #1a7a1a; }
+.conn-status.err { color: #c00; }
+
+/* ---------- 按钮 ---------- */
+button {
+  height: 24px;
+  min-width: 64px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 2px;
+  background: var(--pane-head-grad);
+  cursor: pointer;
+  font-size: 12px;
+}
+button:hover { background: #e5f1fb; border-color: #7ea4c7; }
+button:active { background: #d2e3f3; }
+button.primary { font-weight: 600; }
+button.mini { height: 18px; min-width: 0; padding: 0 6px; font-size: 11px; float: right; }
+
+/* ---------- 页签 ---------- */
+.tabs {
+  display: flex;
+  margin: 6px 8px 0;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.tab {
+  padding: 5px 16px;
+  border: 1px solid var(--border);
+  border-bottom: none;
+  border-radius: 3px 3px 0 0;
+  background: var(--chrome-dark);
+  margin-right: 2px;
+  cursor: pointer;
+  user-select: none;
+}
+.tab.active {
+  background: #fff;
+  font-weight: 600;
+  position: relative;
+  top: 1px;
+}
+.tab-body { display: none; flex: 1 1 auto; min-height: 0; padding: 6px 8px; }
+.tab-body.active { display: flex; }
+.tab-body > * { flex: 1; }
+
+/* ---------- 三栏网格 ---------- */
+.iface-grid, .vq-grid {
+  display: grid;
+  gap: 6px;
+  height: 100%;
+  min-height: 0;
+}
+.iface-grid { grid-template-columns: 220px 1fr 1fr; }
+.vq-grid { grid-template-columns: 300px 1fr; }
+
+.pane {
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+.pane-head {
+  flex: none;
+  padding: 4px 8px;
+  background: var(--pane-head-grad);
+  border-bottom: 1px solid var(--border);
+  font-weight: 600;
+}
+
+/* ---------- 左栏：接口列表 ---------- */
+.method-list {
+  list-style: none;
+  overflow: auto;
+  flex: 1 1 auto;
+  padding: 2px 0;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+}
+.method-list li {
+  padding: 2px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.method-list li:hover { background: #e8f0fe; }
+.method-list li.sel { background: var(--sel); color: #fff; }
+.method-list li.local-only { color: #8a6d3b; font-style: italic; }
+
+/* ---------- 中栏：函数信息 ---------- */
+.func-body { flex: 1 1 auto; overflow: auto; padding: 8px 12px; }
+.func-name-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.fn-label { font-weight: 600; flex: none; }
+.fn-name { font-family: Consolas, monospace; color: #0000c0; font-weight: 600; }
+.fn-desc { color: #666; }
+
+.param-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 18px;
+}
+.param-field label {
+  display: block;
+  margin-bottom: 2px;
+  font-weight: 600;
+}
+.param-field label .pk { color: #0000c0; font-family: Consolas, monospace; }
+.param-ctrl { display: flex; gap: 3px; }
+.param-ctrl input, .param-ctrl select, .param-ctrl textarea {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid var(--border);
+  font-size: 12px;
+  padding: 3px 5px;
+  font-family: inherit;
+}
+.param-ctrl textarea { min-height: 44px; font-family: Consolas, monospace; resize: vertical; }
+.param-ctrl .dots {
+  flex: none; width: 24px; min-width: 0; padding: 0;
+  font-weight: 700;
+}
+
+.func-actions {
+  margin-top: 16px;
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+}
+.func-actions button { min-width: 110px; height: 26px; }
+
+/* ---------- 右栏：调用结果 ---------- */
+.result-view {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 8px;
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #fff;
+  cursor: pointer;
+  color: #1a3a1a;
+}
+.result-view.err { color: #b00; }
+.result-tip {
+  flex: none;
+  border-top: 1px solid var(--border);
+  padding: 4px 8px;
+  background: #ffffe1;
+  color: #555;
+  font-size: 11px;
+}
+
+/* ---------- 页签2：客户端签章 ---------- */
+.cs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; height: 100%; }
+.cs-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; overflow: auto; }
+.cs-row { display: flex; align-items: center; gap: 6px; }
+.cs-row > span:first-child { flex: none; width: 72px; text-align: right; }
+.cs-row input { flex: 1; height: 24px; border: 1px solid var(--border); padding: 0 6px; }
+.cs-actions { display: flex; gap: 10px; justify-content: center; }
+
+/* ---------- 页签3：凭证查询 ---------- */
+.vq-viewer { flex: 1 1 auto; overflow: auto; position: relative; background: #808080; display: flex; justify-content: center; padding: 10px; }
+.vq-viewer canvas { background: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.4); height: auto; }
+.viewer-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  color: #ddd; font-size: 14px;
+}
+
+/* ---------- 「…」联动选择下拉 ---------- */
+.opt-menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 300px;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid #7ea4c7;
+  box-shadow: 2px 3px 8px rgba(0,0,0,.25);
+  font-size: 12px;
+}
+.opt-head {
+  flex: none;
+  padding: 4px 10px;
+  background: var(--chrome, #eef3f8);
+  border-bottom: 1px solid var(--border, #cfd8e3);
+  color: #33506b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.opt-search {
+  flex: none;
+  margin: 4px 6px;
+  padding: 3px 6px;
+  border: 1px solid #9bb6d1;
+  border-radius: 2px;
+  font-size: 12px;
+  outline: none;
+}
+.opt-search:focus { border-color: var(--sel, #3d76b3); }
+.opt-list {
+  flex: 1 1 auto;
+  overflow: auto;
+  min-height: 0;
+}
+.opt-empty {
+  padding: 8px 10px;
+  color: #999;
+}
+.opt-item {
+  padding: 4px 10px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.opt-item:hover { background: var(--sel); color: #fff; }
+.opt-item.disabled {
+  white-space: normal;
+  color: #8a6d3b;
+  cursor: default;
+  line-height: 1.5;
+  padding: 8px 10px;
+  background: #fffdf5;
+}
+.opt-item.disabled:hover { background: #fffdf5; color: #8a6d3b; }
+
+/* ---------- 状态栏 ---------- */
+.statusbar {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 18px;
+  padding: 3px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--chrome);
+  color: #444;
+  max-height: 76px;
+  overflow-y: auto;
+}
+/* 联动说明（签章位置/印章 SN 等）可能较长：单独占一行并允许折行，不被截断 */
+#st-msg {
+  flex: 1 1 100%;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+/* ---------- 水印（对齐原版厂商水印） ---------- */
+body::after {
+  content: "中科江南软件";
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 72px;
+  font-weight: 700;
+  color: rgba(0, 0, 160, .05);
+  pointer-events: none;
+  z-index: 999;
+  letter-spacing: 12px;
+}
