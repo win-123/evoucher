@@ -287,8 +287,148 @@ function showMenu(anchor, options, onPick, meta) {
   setTimeout(() => document.addEventListener("click", closeMenu, true), 0);
 }
 
+/* ================= 凭证原文编辑器（弹窗） ================= */
+// 这些参数是「凭证原文」类报文（WSDL 里多为 base64Binary），「…」改为打开编辑器而不是候选列表
+const VOUCHER_KEYS = new Set(["vouchermessage", "vouchers", "voucherdata", "signedvoucher", "voucher"]);
+
+const vm = {
+  field: null, // 当前正在编辑的参数输入框
+  key: "",
+  busy: false,
+};
+
+const vmEl = () => $("#vm-mask");
+
+function vmInfo(text, kind) {
+  const el = $("#vm-info");
+  el.textContent = text;
+  el.className = "modal-info" + (kind ? " " + kind : "");
+}
+
+async function vmPost(body) {
+  return fetch("/api/ws/voucher-message", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ params: collectParams(), ...body }),
+  }).then((x) => x.json());
+}
+
+/** 光标放到空的 <Voucher></Voucher> 中间，方便用户直接粘报文 */
+function focusVoucherSlot() {
+  const ta = $("#vm-text");
+  const idx = ta.value.search(/<Voucher>\s*<\/Voucher>/i);
+  if (idx < 0) return;
+  const at = ta.value.indexOf("<Voucher>", idx) + "<Voucher>".length;
+  ta.focus();
+  ta.setSelectionRange(at, at);
+  // 滚动到该位置
+  const before = ta.value.slice(0, at).split("\n").length;
+  const lh = parseFloat(getComputedStyle(ta).lineHeight) || 18;
+  ta.scrollTop = Math.max(0, (before - 6) * lh);
+}
+
+async function openVoucherEditor(field, key) {
+  vm.field = field;
+  vm.key = key;
+  const mask = vmEl();
+  mask.hidden = false;
+  const ta = $("#vm-text");
+
+  const cur = String(field.value || "").trim();
+  setStatus(`正在准备 ${key} 编辑器…`);
+  vmInfo("正在生成报文头…");
+
+  if (cur) {
+    // 已有值：解码成明文再编辑（避免在 base64 上改）
+    const d = await vmPost({ action: "decode", text: cur });
+    if (d.ok && d.text) {
+      ta.value = d.text;
+      vmInfo(`已载入当前参数值并解码为明文（整包 ${cur.length} 字符 → 明文 ${d.text.length} 字符），可直接修改 <Voucher> 内容`, "ok");
+      ta.focus();
+      return;
+    }
+  }
+
+  const r = await vmPost({ action: "template" });
+  ta.value = r.ok ? r.text : "";
+  vmInfo(r.note || "报文头已生成", r.ok ? "" : "err");
+  if (r.ok) focusVoucherSlot();
+  setStatus(`${key}：编辑器已打开，报文头按当前参数生成，填入凭证报文后点「填入报文」`);
+}
+
+function closeVoucherEditor() {
+  vmEl().hidden = true;
+  vm.field = null;
+  vm.key = "";
+}
+
+$("#vm-close").addEventListener("click", closeVoucherEditor);
+$("#vm-cancel").addEventListener("click", closeVoucherEditor);
+vmEl().addEventListener("click", (e) => {
+  if (e.target === vmEl()) closeVoucherEditor();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !vmEl().hidden) closeVoucherEditor();
+});
+
+$("#vm-reset").addEventListener("click", async () => {
+  const r = await vmPost({ action: "template" });
+  if (!r.ok) return vmInfo(r.message || "生成模板失败", "err");
+  $("#vm-text").value = r.text;
+  vmInfo(r.note || "报文头已重置", "ok");
+  focusVoucherSlot();
+});
+
+$("#vm-load-server").addEventListener("click", async () => {
+  const btn = $("#vm-load-server");
+  btn.disabled = true;
+  vmInfo("正在从服务端读取凭证原文…");
+  const r = await vmPost({ action: "server" });
+  btn.disabled = false;
+  if (!r.ok) return vmInfo(r.message || "取原文失败", "err");
+  $("#vm-text").value = r.text || "";
+  vmInfo(r.note || "已取服务端原文", r.source === "readVoucherByNo" ? "ok" : "");
+});
+
+// 解析并校验：只编码不填参数，把两层长度/提取到的编号报给用户
+$("#vm-format").addEventListener("click", async () => {
+  const r = await vmPost({ action: "encode", text: $("#vm-text").value });
+  if (!r.ok) return vmInfo("校验失败：" + (r.message || "未知错误"), "err");
+  vmInfo(
+    `校验通过：内层明文 ${r.innerPlainLength} 字符 → base64 ${r.innerB64Length} 字符` +
+      `${r.innerAlreadyEncoded ? "（已是 base64，未二次编码）" : "（已按 GBK 编码）"}；` +
+      `整包 ${r.mofLength} 字符 → base64 ${r.payloadLength} 字符。` +
+      `解析到 VoucherNo=${r.voucherNo || "(空)"} VtCode=${r.vtCode || "(空)"}。点「填入报文」即写入参数。`,
+    "ok"
+  );
+});
+
+$("#vm-apply").addEventListener("click", async () => {
+  if (!vm.field) return;
+  const btn = $("#vm-apply");
+  btn.disabled = true;
+  const r = await vmPost({ action: "encode", text: $("#vm-text").value });
+  btn.disabled = false;
+  if (!r.ok) return vmInfo("填入失败：" + (r.message || "未知错误"), "err");
+
+  vm.field.value = r.payload;
+  const key = vm.key;
+  closeVoucherEditor();
+  setStatus(
+    `已填入 ${key}：内层 base64 ${r.innerB64Length} 字符，整包 base64 ${r.payloadLength} 字符` +
+      `（VoucherNo=${r.voucherNo || "-"} / VtCode=${r.vtCode || "-"}）`
+  );
+  // 凭证原文变了 → 下游签章报文的编号/类型可能失效，提示重新联动
+  if (r.voucherNo) setStatus(`${$("#st-msg").textContent}；签章信息如需同步请点它的「…」重新生成`);
+});
+
 async function onDotsClick(ev, key, field) {
   ev.stopPropagation();
+  // 凭证原文类参数：打开专用编辑器，而不是候选下拉
+  if (VOUCHER_KEYS.has(String(key).toLowerCase())) {
+    await openVoucherEditor(field, key);
+    return;
+  }
   const params = collectParams(); // 联动上下文 = 当前所有参数值
   setStatus(`正在解析 ${key} 的可选值…`);
   const r = await fetch("/api/ws/options", {

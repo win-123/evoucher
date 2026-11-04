@@ -13,7 +13,9 @@ const express = require("express");
 const { makeSampleVoucherPdf } = require("./pdf-gen");
 const { MockProvider, RealHttpProvider } = require("./providers");
 const { METHODS, getMethod, getOptions, GENERIC_PARAMS, PARAM_LABELS } = require("./interface-methods");
-const { resolveOptions } = require("./link-options");
+const {
+  resolveOptions, buildVoucherTemplate, decodeVoucherForEdit, encodeVoucherFromEdit, pick,
+} = require("./link-options");
 const { soapCall } = require("./soap");
 
 const PORT = process.env.EVOUCHER_PORT || 8721;
@@ -370,6 +372,81 @@ function createApp() {
       res.json(out);
     } catch (e) {
       res.json({ ok: false, key, message: String(e.message || e) });
+    }
+  });
+
+  /**
+   * 凭证原文编辑器（voucherMessage）：
+   *   action=template → 返回带当前参数的报文头模板（<Voucher> 留空待填）
+   *   action=server   → 取服务端原文并**两层解码**成明文，供源码式编辑
+   *   action=encode   → 用户编辑后的明文 → 内层 <Voucher> base64(GBK) → 整包 base64(GBK)
+   */
+  app.post("/api/ws/voucher-message", async (req, res) => {
+    const { action, params, text } = req.body || {};
+    const p = params || {};
+    const ctx = {
+      cert: pick(p, ["certid"]) || "TC10163135",
+      div: pick(p, ["admdivcode"]) || "500000",
+      year: pick(p, ["styear"]) || String(new Date().getFullYear()),
+      vt: pick(p, ["vtcode", "vt_code"]),
+      no: pick(p, ["voucherno", "voucher_no", "vouchernos"]),
+    };
+    try {
+      if (action === "encode") {
+        const r = encodeVoucherFromEdit(text, p);
+        return res.json(r.ok === false ? { ok: false, message: r.message } : { ok: true, ...r });
+      }
+
+      // decode：把参数里已有的 base64 原文解成明文，供编辑器直接修改
+      if (action === "decode") {
+        const dec = decodeVoucherForEdit(text);
+        if (!dec) return res.json({ ok: false, message: "当前参数值不是有效的 base64 凭证原文（可能填的是明文或已损坏），将改为生成标准报文头" });
+        return res.json({ ok: true, action: "decode", text: dec.text, innerText: dec.innerText });
+      }
+
+      // template / server：都先给出模板骨架
+      const tpl = buildVoucherTemplate({ div: ctx.div, year: ctx.year, vt: ctx.vt, no: ctx.no });
+
+      if (action === "server") {
+        if (wsState.source === "wsdl" && wsState.endpoint) {
+          let targetNo = ctx.no;
+          if (!targetNo) {
+            const q = await soapForLink("queryVoucherNosByTime", {
+              certid: ctx.cert, admdivcode: ctx.div, styear: ctx.year, vtcode: ctx.vt,
+              starttime: `${ctx.year}0101000000`, endtime: `${ctx.year}1231235959`,
+            });
+            const list = q.ok ? (Array.isArray(q.result) ? q.result : Object.keys(q.result || {})) : [];
+            if (list.length) targetNo = list[0];
+          }
+          if (targetNo) {
+            const r = await soapForLink("readVoucherByNo", {
+              certid: ctx.cert, admdivcode: ctx.div, styear: ctx.year, vtcode: ctx.vt, vouchernos: targetNo,
+            });
+            if (r.ok) {
+              const raw = Array.isArray(r.result) ? r.result[0] : r.result;
+              const dec = decodeVoucherForEdit(raw);
+              if (dec) {
+                return res.json({
+                  ok: true, action: "server", text: dec.text, voucherNo: targetNo,
+                  source: "readVoucherByNo",
+                  note: `已取服务端原文（编号 ${targetNo}）并解码为明文，可直接修改 <Voucher> 内容`,
+                });
+              }
+            }
+          }
+        }
+        return res.json({
+          ok: true, action: "server", text: tpl, source: "模板",
+          note: "服务端取不到该凭证原文（未连接 / 编号不存在），已给出标准报文头模板",
+        });
+      }
+
+      res.json({
+        ok: true, action: "template", text: tpl, source: "模板",
+        note: "已按当前参数（区划/年度/凭证类型/凭证编号）生成报文头，请把凭证报文填入 <Voucher> 中间",
+      });
+    } catch (e) {
+      res.json({ ok: false, message: String(e.message || e) });
     }
   });
 

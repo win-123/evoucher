@@ -280,6 +280,135 @@ function vtCodeFromMessage(v) {
   return m ? m[1].trim() : "";
 }
 
+/* ==================================================================
+ * 凭证原文（voucherMessage / base64Binary）的「源码式」编辑器支持
+ *
+ * 报文两层结构（实测自 readVoucherByNo）：
+ *   base64(GBK) 整包 MOF
+ *     └─ <VoucherBody AdmDivCode StYear VtCode VoucherNo>
+ *          └─ <Voucher> base64(GBK) 凭证要素 XML </Voucher>
+ *
+ * 编辑器里给用户看的是**解码后的明文**（两层都解开），点「填入」时：
+ *   ① 把 <Voucher> 内的明文按 GBK 转 base64 放回原位
+ *   ② 再把整个 MOF 按 GBK 转 base64，填入参数
+ * ================================================================== */
+
+const gbkB64 = (s) => iconv.encode(String(s), "gbk").toString("base64");
+const b64ToText = (s) => {
+  try {
+    return iconv.decode(Buffer.from(String(s).replace(/\s+/g, ""), "base64"), "gbk");
+  } catch {
+    return "";
+  }
+};
+const isB64Charset = (s) => /^[A-Za-z0-9+/=\r\n]+$/.test(String(s).trim()) && String(s).trim().length >= 8;
+
+/** 判断一段文本是否已经是 base64 编码的 XML（是则不再二次编码） */
+function looksEncodedXml(s) {
+  const t = String(s || "").trim();
+  if (!t || !isB64Charset(t)) return false;
+  const txt = b64ToText(t);
+  return /^\s*</.test(txt);
+}
+
+/** 凭证原文模板（报文头 + 空的 <Voucher></Voucher>，与用户手头的标准报文一致） */
+function buildVoucherTemplate({ div, year, vt, no }) {
+  return [
+    '<?xml version="1.0" encoding="GBK"?>',
+    "<MOF>",
+    "<VoucherCount>1</VoucherCount>",
+    `<VoucherBody AdmDivCode="${div}" StYear="${year}" VtCode="${vt}" VoucherNo="${no}">`,
+    "<VoucherFlag>1</VoucherFlag>   0未做操作  1确认后发回",
+    "<Return_Reason></Return_Reason>",
+    "<Attach></Attach>",
+    "<SupplementFlag>0</SupplementFlag>",
+    "<Voucher>",
+    "</Voucher>",
+    "</VoucherBody>",
+    "</MOF>",
+  ].join("\n");
+}
+
+/** 取 <Voucher> 内层文本（明文或 base64 皆可） */
+function innerVoucherOf(mofText) {
+  const m = String(mofText || "").match(/<Voucher>([\s\S]*?)<\/Voucher>/i);
+  return m ? m[1] : null;
+}
+
+/**
+ * 服务器返回的 base64 原文 → 可直接编辑的明文 MOF（内层 <Voucher> 也解开）
+ * @returns {{text:string,innerText:string}|null}
+ */
+function decodeVoucherForEdit(rawB64) {
+  const outer = b64ToText(rawB64);
+  if (!isBusinessXml(outer)) return null;
+  const inner = innerVoucherOf(outer);
+  if (inner === null) return { text: outer, innerText: "" };
+  const plain = looksEncodedXml(inner) ? b64ToText(inner) : inner;
+  return { text: outer.replace(/<Voucher>[\s\S]*?<\/Voucher>/i, `<Voucher>\n${plain.trim()}\n</Voucher>`), innerText: plain };
+}
+
+/**
+ * 编辑器明文 → 填入参数用的最终值（两层 base64(GBK)）
+ * 规则：内层若是明文 XML → 编码；若已经是 base64(明文XML) → 保持原样（避免二次编码）
+ */
+function encodeVoucherFromEdit(text, params) {
+  const src = String(text || "").replace(/\r\n/g, "\n");
+  const inner = innerVoucherOf(src);
+  if (inner === null) return { ok: false, message: "报文里找不到 <Voucher></Voucher> 节点，无法确定凭证要素要放在哪里" };
+
+  const innerRaw = inner.trim();
+  if (!innerRaw) return { ok: false, message: "请先在 <Voucher></Voucher> 中间填入凭证报文" };
+
+  const already = looksEncodedXml(innerRaw);
+  const innerB64 = already ? innerRaw.replace(/\s+/g, "") : gbkB64(innerRaw);
+  const innerPlainLen = already ? b64ToText(innerB64).length : innerRaw.length;
+
+  let mof = src.replace(/<Voucher>[\s\S]*?<\/Voucher>/i, `<Voucher>${innerB64}</Voucher>`);
+
+  // VoucherBody 上的属性不能留空：先用参数值兜底，再从凭证要素里反推
+  const innerPlain = b64ToText(innerB64);
+  const derive = (tag) => {
+    const m = innerPlain.match(new RegExp(`<${tag}>\\s*([^<\\s]+)\\s*</${tag}>`, "i"));
+    return m ? m[1].trim() : "";
+  };
+  const attrFill = { VoucherNo: derive("VoucherNo"), AdmDivCode: derive("AdmDivCode"), StYear: derive("StYear"), VtCode: derive("VtCode") };
+  const p = params || {};
+  const fromParam = {
+    VoucherNo: pick(p, ["voucherno", "voucher_no", "vouchernos"]),
+    AdmDivCode: pick(p, ["admdivcode"]),
+    StYear: pick(p, ["styear"]),
+    VtCode: pick(p, ["vtcode", "vt_code"]),
+  };
+  mof = mof.replace(/<VoucherBody\b([^>]*)>/i, (all, attrs) => {
+    let out = attrs;
+    for (const key of ["VoucherNo", "AdmDivCode", "StYear", "VtCode"]) {
+      const re = new RegExp(`${key}\\s*=\\s*"([^"]*)"`, "i");
+      const cur = (out.match(re) || [])[1] || "";
+      if (cur.trim()) continue;
+      const val = attrFill[key] || fromParam[key] || "";
+      if (!val) continue;
+      out = re.test(out) ? out.replace(re, `${key}="${val}"`) : `${out} ${key}="${val}"`;
+    }
+    return `<VoucherBody${out}>`;
+  });
+
+  const payload = gbkB64(mof);
+  return {
+    ok: true,
+    payload,
+    encoding: "base64(GBK)",
+    mofText: mof,
+    innerAlreadyEncoded: already,
+    innerPlainLength: innerPlainLen,
+    innerB64Length: innerB64.length,
+    mofLength: mof.length,
+    payloadLength: payload.length,
+    voucherNo: (mof.match(/VoucherNo\s*=\s*"([^"]*)"/i) || [])[1] || "",
+    vtCode: (mof.match(/VtCode\s*=\s*"([^"]*)"/i) || [])[1] || "",
+  };
+}
+
 /** Axis 的 Map 应答 → key 列表（区分大小写，去重排序） */
 function mapKeys(r) {
   let arr = [];
@@ -803,4 +932,8 @@ async function resolveOptions(ctx) {
   }
 }
 
-module.exports = { resolveOptions, pick, decodeB64Text, parseCerts, parseCertsXml, buildStampXml, toCompact };
+module.exports = {
+  resolveOptions, pick, decodeB64Text, parseCerts, parseCertsXml, buildStampXml, toCompact,
+  // 凭证原文编辑器
+  buildVoucherTemplate, decodeVoucherForEdit, encodeVoucherFromEdit, gbkB64, b64ToText,
+};

@@ -127,6 +127,32 @@
     </div>
   </div>
 
+  <!-- ═══ 凭证原文编辑器（点「凭证原文」的「…」弹出） ═══ -->
+  <div id="vm-mask" class="modal-mask" hidden>
+    <div class="modal" role="dialog" aria-labelledby="vm-title">
+      <div class="modal-head">
+        <span id="vm-title" class="modal-title">凭证原文</span>
+        <span class="modal-sub">voucherMessage · base64Binary · 两层结构</span>
+        <span id="vm-close" class="modal-close" title="关闭">✕</span>
+      </div>
+      <div class="modal-hint">
+        报文头已按当前参数（区划 / 年度 / 凭证类型 / 凭证编号）生成。把你的凭证报文填到
+        <code>&lt;Voucher&gt; … &lt;/Voucher&gt;</code> 中间，点「填入报文」后自动完成：
+        内层按 GBK 转 base64 放回 <code>&lt;Voucher&gt;</code>，整包再转 base64 填入参数。
+      </div>
+      <textarea id="vm-text" class="modal-code" spellcheck="false" wrap="off"></textarea>
+      <div id="vm-info" class="modal-info">—</div>
+      <div class="modal-foot">
+        <button id="vm-load-server" type="button">从服务端取原文</button>
+        <button id="vm-reset" type="button">重置报文头</button>
+        <button id="vm-format" type="button">解析并校验</button>
+        <span class="modal-spacer"></span>
+        <button id="vm-cancel" type="button">取消</button>
+        <button id="vm-apply" class="primary" type="button">填入报文</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 状态栏 -->
   <div class="statusbar">
     <span id="st-conn">连接：未连接</span>
