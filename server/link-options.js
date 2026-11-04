@@ -316,23 +316,118 @@ function buildVoucherTemplate({ div, year, vt, no }) {
   return [
     '<?xml version="1.0" encoding="GBK"?>',
     "<MOF>",
-    "<VoucherCount>1</VoucherCount>",
-    `<VoucherBody AdmDivCode="${div}" StYear="${year}" VtCode="${vt}" VoucherNo="${no}">`,
-    "<VoucherFlag>1</VoucherFlag>   0未做操作  1确认后发回",
-    "<Return_Reason></Return_Reason>",
-    "<Attach></Attach>",
-    "<SupplementFlag>0</SupplementFlag>",
-    "<Voucher>",
-    "</Voucher>",
-    "</VoucherBody>",
+    "   <VoucherCount>1</VoucherCount>",
+    `   <VoucherBody AdmDivCode="${div}" StYear="${year}" VtCode="${vt}" VoucherNo="${no}">`,
+    "      <VoucherFlag>1</VoucherFlag>",
+    "      <Return_Reason></Return_Reason>",
+    "      <Attach></Attach>",
+    "      <Voucher>",
+    "      </Voucher>",
+    "   </VoucherBody>",
     "</MOF>",
   ].join("\n");
 }
 
-/** 取 <Voucher> 内层文本（明文或 base64 皆可） */
+/**
+ * 定位最外层 <Voucher> … </Voucher> 的区间（**标签配对扫描**）。
+ *
+ * ★ 必须配对扫描，不能用 `/<Voucher>[\s\S]*?<\/Voucher>/`：
+ *   凭证要素 XML 自己的根标签也叫 <Voucher>，MOF 里是「外层 <Voucher> 包 base64(内层含 <Voucher> 根的 XML)」。
+ *   编辑器把内层解成明文后，报文里就有两个 <Voucher>；惰性正则会停在**内层**的 </Voucher>，
+ *   替换后残留一个 </Voucher> → 服务端 EVS213/EVS201「解析报文格式不正确」。
+ *
+ * @returns {{start:number, innerStart:number, innerEnd:number, end:number}|null}
+ */
+function findVoucherSpan(mofText) {
+  const s = String(mofText || "");
+  const openRe = /<Voucher(\s[^>]*)?>/gi;
+  let first = null;
+  while ((first = openRe.exec(s))) {
+    if (!/\/>$/.test(first[0])) break; // 跳过自闭合 <Voucher/>
+    first = null;
+  }
+  if (!first) return null;
+
+  const tagRe = /<(\/?)Voucher(\s[^>]*?)?(\/?)>/gi;
+  tagRe.lastIndex = first.index;
+  let depth = 0;
+  let m;
+  while ((m = tagRe.exec(s))) {
+    if (m[3] === "/") continue; // 自闭合 <Voucher/>
+    if (m[1] === "/") {
+      depth--;
+      if (depth === 0) {
+        return {
+          start: first.index,
+          innerStart: first.index + first[0].length,
+          innerEnd: m.index,
+          end: m.index + m[0].length,
+        };
+      }
+    } else {
+      depth++;
+    }
+  }
+  return null;
+}
+
+/** 取最外层 <Voucher> 内层文本（明文或 base64 皆可） */
 function innerVoucherOf(mofText) {
-  const m = String(mofText || "").match(/<Voucher>([\s\S]*?)<\/Voucher>/i);
-  return m ? m[1] : null;
+  const sp = findVoucherSpan(mofText);
+  return sp ? String(mofText).slice(sp.innerStart, sp.innerEnd) : null;
+}
+
+/** 把最外层 <Voucher> 的内容换成 innerText，其余字节原样保留 */
+function replaceVoucherInner(mofText, innerText) {
+  const sp = findVoucherSpan(mofText);
+  if (!sp) return null;
+  const s = String(mofText);
+  return s.slice(0, sp.innerStart) + innerText + s.slice(sp.innerEnd);
+}
+
+/** 第 i 个字符所在行号（报错定位用） */
+const lineOf = (s, i) => String(s).slice(0, i).split("\n").length;
+
+/**
+ * XML 标签配对自检（够用即可：忽略声明/注释/CDATA，栈式比对）。
+ * 目的：在**本地**就把「多一个 </Voucher>」这类结构错误挡住，不要等服务端 EVS201。
+ */
+function checkXmlBalance(xmlText) {
+  const s = String(xmlText || "")
+    .replace(/<\?[\s\S]*?\?>/g, "")
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<!\[CDATA\[[\s\S]*?\]\]>/g, "");
+  const stack = [];
+  const re = /<\/?([A-Za-z_][\w.:-]*)([^>]*?)(\/?)>/g;
+  let m;
+  while ((m = re.exec(s))) {
+    const closing = m[0][1] === "/";
+    const name = m[1];
+    if (m[3] === "/") continue;
+    if (!closing) {
+      stack.push({ name, at: m.index });
+      continue;
+    }
+    const top = stack.pop();
+    if (!top) return { ok: false, message: `第 ${lineOf(s, m.index)} 行出现多余的 </${name}>` };
+    if (top.name !== name) {
+      return {
+        ok: false,
+        message: `第 ${lineOf(s, m.index)} 行的 </${name}> 与第 ${lineOf(s, top.at)} 行的 <${top.name}> 不匹配`,
+      };
+    }
+  }
+  if (stack.length) {
+    const top = stack[stack.length - 1];
+    return { ok: false, message: `第 ${lineOf(s, top.at)} 行的 <${top.name}> 没有闭合标签` };
+  }
+  return { ok: true };
+}
+
+/** 内层明文的根标签是否就是 <Voucher>（服务端要求凭证要素以 Voucher 为根） */
+function hasVoucherRoot(xmlText) {
+  const t = String(xmlText || "").replace(/<\?[\s\S]*?\?>/g, "").trim();
+  return /^<Voucher(\s|>)/i.test(t) || /^<Voucher\/>$/i.test(t);
 }
 
 /**
@@ -345,7 +440,8 @@ function decodeVoucherForEdit(rawB64) {
   const inner = innerVoucherOf(outer);
   if (inner === null) return { text: outer, innerText: "" };
   const plain = looksEncodedXml(inner) ? b64ToText(inner) : inner;
-  return { text: outer.replace(/<Voucher>[\s\S]*?<\/Voucher>/i, `<Voucher>\n${plain.trim()}\n</Voucher>`), innerText: plain };
+  const text = replaceVoucherInner(outer, `\n${plain.trim()}\n      `);
+  return { text: text === null ? outer : text, innerText: plain };
 }
 
 /**
@@ -354,20 +450,30 @@ function decodeVoucherForEdit(rawB64) {
  */
 function encodeVoucherFromEdit(text, params) {
   const src = String(text || "").replace(/\r\n/g, "\n");
-  const inner = innerVoucherOf(src);
-  if (inner === null) return { ok: false, message: "报文里找不到 <Voucher></Voucher> 节点，无法确定凭证要素要放在哪里" };
+  const span = findVoucherSpan(src);
+  if (!span) return { ok: false, message: "报文里找不到 <Voucher></Voucher> 节点，无法确定凭证要素要放在哪里" };
 
-  const innerRaw = inner.trim();
+  let innerRaw = src.slice(span.innerStart, span.innerEnd).trim();
   if (!innerRaw) return { ok: false, message: "请先在 <Voucher></Voucher> 中间填入凭证报文" };
+  if (/<MOF\b/i.test(innerRaw)) {
+    return { ok: false, message: "你把整包 MOF 报文粘进了 <Voucher> 里：这里只放凭证要素（<Voucher>…</Voucher>，或其内部的 Id/VoucherNo/PayAmt 等字段）" };
+  }
 
   const already = looksEncodedXml(innerRaw);
-  const innerB64 = already ? innerRaw.replace(/\s+/g, "") : gbkB64(innerRaw);
-  const innerPlainLen = already ? b64ToText(innerB64).length : innerRaw.length;
+  const wrapped = !already && !hasVoucherRoot(innerRaw);
+  if (wrapped) {
+    // 服务端要求内层根节点为 <Voucher>（实测 readVoucherByNo 的内层就是 Voucher 根），只填了字段时自动补一层
+    innerRaw = `<?xml version="1.0" encoding="GBK"?>\n<Voucher>\n${innerRaw}\n</Voucher>`;
+  }
 
-  let mof = src.replace(/<Voucher>[\s\S]*?<\/Voucher>/i, `<Voucher>${innerB64}</Voucher>`);
+  const innerB64 = already ? innerRaw.replace(/\s+/g, "") : gbkB64(innerRaw);
+  const innerPlain = already ? b64ToText(innerB64) : innerRaw;
+  const innerPlainLen = innerPlain.length;
+
+  // ★ 用配对区间切片拼接，不能 replace 惰性正则（内层也含 <Voucher>，会残留 </Voucher> → EVS201）
+  let mof = src.slice(0, span.innerStart) + innerB64 + src.slice(span.innerEnd);
 
   // VoucherBody 上的属性不能留空：先用参数值兜底，再从凭证要素里反推
-  const innerPlain = b64ToText(innerB64);
   const derive = (tag) => {
     const m = innerPlain.match(new RegExp(`<${tag}>\\s*([^<\\s]+)\\s*</${tag}>`, "i"));
     return m ? m[1].trim() : "";
@@ -393,6 +499,15 @@ function encodeVoucherFromEdit(text, params) {
     return `<VoucherBody${out}>`;
   });
 
+  // —— 本地自检：结构不平衡的不让它发出去（否则服务端只回 EVS201，看不出哪一行错）——
+  const bal = checkXmlBalance(mof);
+  if (!bal.ok) return { ok: false, message: "报文结构自检不通过：" + bal.message };
+  const openN = (mof.match(/<Voucher(\s[^>]*)?>/gi) || []).length;
+  const closeN = (mof.match(/<\/Voucher>/gi) || []).length;
+  if (openN !== closeN) {
+    return { ok: false, message: `报文结构自检不通过：<Voucher> 有 ${openN} 个、</Voucher> 有 ${closeN} 个，标签不配对` };
+  }
+
   const payload = gbkB64(mof);
   return {
     ok: true,
@@ -400,10 +515,18 @@ function encodeVoucherFromEdit(text, params) {
     encoding: "base64(GBK)",
     mofText: mof,
     innerAlreadyEncoded: already,
+    innerWrapped: wrapped,
     innerPlainLength: innerPlainLen,
     innerB64Length: innerB64.length,
     mofLength: mof.length,
     payloadLength: payload.length,
+    voucherCount: openN,
+    checks: [
+      "XML 标签配对：通过",
+      `<Voucher> × ${openN}（外层 1 + 凭证要素 1）`,
+      already ? "内层已是 base64，未二次编码" : "内层明文已按 GBK 转 base64",
+      wrapped ? "凭证要素缺少 <Voucher> 根节点，已自动补一层" : "凭证要素根节点为 <Voucher>",
+    ],
     voucherNo: (mof.match(/VoucherNo\s*=\s*"([^"]*)"/i) || [])[1] || "",
     vtCode: (mof.match(/VtCode\s*=\s*"([^"]*)"/i) || [])[1] || "",
   };

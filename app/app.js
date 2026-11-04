@@ -398,7 +398,9 @@ $("#vm-format").addEventListener("click", async () => {
     `校验通过：内层明文 ${r.innerPlainLength} 字符 → base64 ${r.innerB64Length} 字符` +
       `${r.innerAlreadyEncoded ? "（已是 base64，未二次编码）" : "（已按 GBK 编码）"}；` +
       `整包 ${r.mofLength} 字符 → base64 ${r.payloadLength} 字符。` +
-      `解析到 VoucherNo=${r.voucherNo || "(空)"} VtCode=${r.vtCode || "(空)"}。点「填入报文」即写入参数。`,
+      `解析到 VoucherNo=${r.voucherNo || "(空)"} VtCode=${r.vtCode || "(空)"}。` +
+      (r.checks ? `自检：${r.checks.join("；")}。` : "") +
+      `点「填入报文」即写入参数。`,
     "ok"
   );
 });
